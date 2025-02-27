@@ -1216,7 +1216,7 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
     // First, clear ALL existing markers from the map
     if (mapRef.current) {
       mapRef.current.eachLayer((layer) => {
-        if (layer instanceof L.Marker && layer.getElement()?.classList.contains('vertex-marker')) {
+        if (layer instanceof L.Marker) {
           mapRef.current?.removeLayer(layer);
         }
       });
@@ -1262,14 +1262,9 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
             const currentPoints = [...polygon.getLatLngs()[0] as L.LatLng[]];
             currentPoints[index] = newLatLng;
             
-            // Update polygon vertices
             polygon.setLatLngs(currentPoints);
             updateAreaSize(L.GeometryUtil.geodesicArea(currentPoints));
-            
-            // Update points state
             setPoints(currentPoints);
-            
-            // Update distance markers
             updateDistanceMarkers(currentPoints);
           }
         });
@@ -1278,44 +1273,6 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
           const element = marker.getElement();
           if (element) {
             element.style.backgroundColor = '#ffffff';
-          }
-          
-          // Get final position and update all markers
-          const layers = drawnItemsRef.current?.getLayers() || [];
-          if (layers.length > 0) {
-            const polygon = layers[0] as L.Polygon;
-            const finalPoints = polygon.getLatLngs()[0] as L.LatLng[];
-            setPoints(finalPoints);
-            
-            // Clear and recreate all markers
-            vertexMarkers.forEach(m => {
-              if (mapRef.current) {
-                mapRef.current.removeLayer(m);
-              }
-            });
-            
-            // Create new markers for all points
-            const updatedMarkers = finalPoints.map((p, i) => {
-              const newMarker = L.marker(p, {
-                icon: L.divIcon({
-                  className: 'vertex-marker',
-                  html: '<div class="vertex-marker-inner"></div>',
-                  iconSize: [12, 12],
-                  iconAnchor: [6, 6]
-                }),
-                draggable: true
-              });
-              
-              if (mapRef.current) {
-                newMarker.addTo(mapRef.current);
-                // Add the same event listeners to new marker
-                addMarkerEventListeners(newMarker, i, finalPoints);
-              }
-              
-              return newMarker;
-            });
-            
-            setVertexMarkers(updatedMarkers);
           }
         });
       }
@@ -1713,7 +1670,7 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
             <span className="font-semibold text-blue-600 text-xs sm:text-base">
               {drawnItemsRef.current?.getLayers().length > 0 
                 ? (drawnItemsRef.current.getLayers()[drawnItemsRef.current.getLayers().length - 1] as L.Polygon)
-                  .getLatLngs()[0].length - 1
+                  .getLatLngs()[0].length 
                 : 0}
             </span>
           </div>
