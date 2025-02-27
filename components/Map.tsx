@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
-import { FaSearch, FaPen, FaTrash, FaRuler, FaUndo, FaRedo, FaSave, FaLayerGroup, FaLocationArrow } from 'react-icons/fa';
+import { FaSearch, FaPen, FaTrash, FaRuler, FaUndo, FaRedo, FaSave, FaLayerGroup, FaLocationArrow, FaEdit, FaChartArea } from 'react-icons/fa';
 import { MdGpsFixed, MdGpsNotFixed } from 'react-icons/md';
 import { Chart } from 'react-chartjs-2';
 import { Chart as ChartJS } from 'chart.js/auto';
@@ -1602,69 +1602,118 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
     };
   }, []);
 
+  // Add handleSave function before the return statement
+  const handleSave = () => {
+    if (!drawnItemsRef.current || points.length < 3) return;
+
+    try {
+      const layers = drawnItemsRef.current.getLayers();
+      if (layers.length === 0) return;
+
+      const polygon = layers[0] as L.Polygon;
+      const vertices = polygon.getLatLngs()[0] as L.LatLng[];
+      
+      // Calculate area
+      const area = L.GeometryUtil.geodesicArea(vertices);
+      
+      // Calculate perimeter
+      let perimeter = 0;
+      for (let i = 0; i < vertices.length; i++) {
+        const start = vertices[i];
+        const end = vertices[(i + 1) % vertices.length];
+        perimeter += start.distanceTo(end);
+      }
+
+      // Create field boundary object
+      const fieldBoundary = {
+        vertices: vertices.map(v => ({ lat: v.lat, lng: v.lng })),
+        area: area,
+        perimeter: perimeter
+      };
+
+      // Convert to JSON string
+      const jsonData = JSON.stringify(fieldBoundary, null, 2);
+      
+      // Create blob and download link
+      const blob = new Blob([jsonData], { type: 'application/json' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `field_boundary_${new Date().toISOString().split('T')[0]}.json`;
+      
+      // Trigger download
+      document.body.appendChild(link);
+      link.click();
+      
+      // Cleanup
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      // Optional: Show success message
+      alert('Field boundary saved successfully!');
+
+    } catch (error) {
+      console.error('Error saving field boundary:', error);
+      alert('Failed to save field boundary. Please try again.');
+    }
+  };
+
   return (
-    <div className="absolute inset-0">
-      {/* Search Icon Button */}
-      <div className="absolute top-4 right-4 z-[1000]">
-        <button
-          onClick={() => setIsSearchVisible(!isSearchVisible)}
-          className="bg-white p-2 rounded-lg shadow-lg hover:bg-gray-50"
-        >
-          <FaSearch className="text-gray-400" />
-        </button>
+    <div className="absolute inset-0 flex flex-col">
+      {/* Top Bar - Search and Layer Controls */}
+      <div className="absolute top-0 left-0 right-0 z-[1000] bg-white/90 backdrop-blur-sm shadow-lg p-2 sm:p-4">
+        <div className="flex items-center justify-between max-w-screen-xl mx-auto">
+          {/* Search Section */}
+          <div className="relative flex-1 max-w-md">
+            <div className="flex items-center bg-gray-50 rounded-full px-3 py-2">
+              <FaSearch className="text-gray-400 mr-2" />
+              <input
+                type="text"
+                placeholder="Search location..."
+                className="bg-transparent w-full outline-none text-sm"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            {/* Search Results Dropdown */}
+            {searchResults.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                {searchResults.map((result, index) => (
+                  <button
+                    key={index}
+                    className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50"
+                    onClick={() => handleResultClick(result)}
+                  >
+                    {result.display_name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Layer Toggle */}
+          <button
+            onClick={cycleMapLayer}
+            className="ml-2 p-2 rounded-full bg-white shadow-md hover:bg-gray-50"
+          >
+            <FaLayerGroup className="text-gray-600" />
+          </button>
+        </div>
       </div>
 
-      {/* Search Bar - Only visible when search icon is clicked */}
-      {isSearchVisible && (
-        <div className="absolute top-16 right-4 z-[1000] w-[calc(100%-32px)] sm:w-[300px]">
-          <div className="bg-white shadow-lg rounded-lg">
-            <div className="p-2">
-              <div className="relative flex items-center">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search location..."
-                  className="w-full pl-3 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  autoFocus
-                />
-                {isSearching && (
-                  <div className="absolute right-3">
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-blue-600" />
-                  </div>
-                )}
-              </div>
+      {/* Map Container */}
+      <div ref={mapContainerRef} className="flex-1 w-full h-full" />
 
-              {searchResults.length > 0 && (
-                <div className="mt-2 max-h-60 overflow-y-auto">
-                  {searchResults.map((result, index) => (
-                    <div
-                      key={index}
-                      onClick={() => {
-                        handleResultClick(result);
-                        setIsSearchVisible(false); // Close search after selection
-                      }}
-                      className="px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm border-b last:border-b-0"
-                    >
-                      {result.display_name}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Area and Corners Display */}
-      <div className="absolute top-24 sm:top-4 left-1/2 -translate-x-1/2 z-[1000] flex gap-4">
-        {/* Existing Area Display */}
-        <div className="bg-white shadow-lg rounded-lg px-2 py-1 sm:px-4 sm:py-2 w-[200px] sm:w-auto">
-          <div className="flex items-center justify-between sm:justify-start gap-1 sm:gap-2">
-            <span className="text-gray-500 text-xs sm:text-base whitespace-nowrap">Area:</span>
-            <span className="font-semibold text-blue-600 text-xs sm:text-base">{areaSize}</span>
+      {/* Bottom Controls Panel */}
+      <div className="absolute bottom-0 left-0 right-0 z-[1000] bg-white/90 backdrop-blur-sm shadow-lg">
+        {/* Stats Bar */}
+        <div className="flex items-center justify-between p-2 border-b">
+          {/* Area Display */}
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-gray-500">Area:</span>
+            <span className="text-sm font-semibold">{areaSize}</span>
             <select
-              className="ml-1 text-xs sm:text-base bg-gray-50 border border-gray-200 rounded px-1 py-0.5 sm:px-2 sm:py-1 outline-none focus:ring-2 focus:ring-blue-500"
+              className="text-sm bg-gray-50 border rounded px-1 py-0.5 outline-none"
               value={selectedUnit}
               onChange={(e) => {
                 setSelectedUnit(e.target.value as MeasurementUnit);
@@ -1682,13 +1731,11 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
               <option value="sqft">ft²</option>
             </select>
           </div>
-        </div>
 
-        {/* New Corners Counter */}
-        <div className="bg-white shadow-lg rounded-lg px-2 py-1 sm:px-4 sm:py-2">
-          <div className="flex items-center gap-1 sm:gap-2">
-            <span className="text-gray-500 text-xs sm:text-base whitespace-nowrap">Corners:</span>
-            <span className="font-semibold text-blue-600 text-xs sm:text-base">
+          {/* Corners Counter */}
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-gray-500">Corners:</span>
+            <span className="text-sm font-semibold">
               {(() => {
                 const layers = drawnItemsRef.current?.getLayers() || [];
                 if (layers.length > 0) {
@@ -1701,164 +1748,109 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
             </span>
           </div>
         </div>
-      </div>
 
-      {/* Tools Panel */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 sm:left-4 sm:top-1/2 sm:-translate-y-1/2 sm:translate-x-0 z-[1000]">
-        <div className="bg-white shadow-lg rounded-lg p-2 sm:p-3">
-          <div className="flex sm:flex-col gap-2 sm:gap-3">
-            {/* Draw Field Button */}
-            <button
-              className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-all duration-200 ${
-                isDrawing ? 'bg-blue-500 text-white' : 'bg-gray-50 hover:bg-gray-100'
-              }`}
-              onClick={toggleDrawing}
-              title={isDrawing ? 'Finish Drawing' : 'Draw Field'}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V3zm1 0v12h12V3H4z" clipRule="evenodd" />
-                <path d="M3 7h14M7 3v14" />
-              </svg>
-            </button>
+        {/* Tools Grid */}
+        <div className="grid grid-cols-4 sm:grid-cols-8 gap-1 p-2">
+          {/* Drawing Tool */}
+          <button
+            onClick={() => setIsDrawing(!isDrawing)}
+            className={`flex flex-col items-center justify-center p-2 rounded-lg ${
+              isDrawing ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-50'
+            }`}
+          >
+            <FaPen className="text-lg mb-1" />
+            <span className="text-xs">Draw</span>
+          </button>
 
-            {/* Undo Button */}
-            <button
-              className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-all duration-200 ${
-                points.length > 0 ? 'bg-gray-50 hover:bg-gray-100' : 'bg-gray-50 opacity-50 cursor-not-allowed'
-              }`}
-              onClick={handleUndo}
-              disabled={points.length === 0}
-              title="Undo"
-            >
-              <FaUndo size={18} />
-            </button>
+          {/* Edit Vertices */}
+          <button
+            onClick={enableVertexEditing}
+            className={`flex flex-col items-center justify-center p-2 rounded-lg ${
+              isEditingVertices ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-50'
+            }`}
+          >
+            <FaEdit className="text-lg mb-1" />
+            <span className="text-xs">Edit</span>
+          </button>
 
-            {/* Redo Button */}
-            <button
-              className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-all duration-200 ${
-                redoStack.length > 0 ? 'bg-gray-50 hover:bg-gray-100' : 'bg-gray-50 opacity-50 cursor-not-allowed'
-              }`}
-              onClick={handleRedo}
-              disabled={redoStack.length === 0}
-              title="Redo"
-            >
-              <FaRedo size={18} />
-            </button>
+          {/* Undo */}
+          <button
+            onClick={handleUndo}
+            disabled={points.length === 0}
+            className="flex flex-col items-center justify-center p-2 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          >
+            <FaUndo className="text-lg mb-1" />
+            <span className="text-xs">Undo</span>
+          </button>
 
-            {/* GPS Button with updated status indicators */}
-            <button
-              className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-all duration-200 ${
-                gpsStatus === 'searching' 
-                  ? 'bg-blue-500 text-white' 
-                  : gpsStatus === 'active'
-                  ? 'bg-green-500 text-white'
-                  : 'bg-gray-50 hover:bg-gray-100'
-              }`}
-              onClick={toggleGPS}
-              title="GPS Tracking"
-            >
-              <FaLocationArrow 
-                className={gpsStatus === 'searching' ? 'animate-spin' : ''} 
-                size={18}
-              />
-            </button>
+          {/* Redo */}
+          <button
+            onClick={handleRedo}
+            disabled={redoStack.length === 0}
+            className="flex flex-col items-center justify-center p-2 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          >
+            <FaRedo className="text-lg mb-1" />
+            <span className="text-xs">Redo</span>
+          </button>
 
-            {/* Layers Button - Now cycles through layers directly */}
-            <button
-              className="flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-lg bg-gray-50 hover:bg-gray-100 transition-all duration-200 relative group"
-              onClick={cycleMapLayer}
-              title={`Map Layer: ${selectedLayer.charAt(0).toUpperCase() + selectedLayer.slice(1)}`}
-            >
-              <FaLayerGroup size={18} />
-              <span className="hidden sm:block absolute left-full ml-2 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap">
-                {selectedLayer.charAt(0).toUpperCase() + selectedLayer.slice(1)}
-              </span>
-            </button>
+          {/* GPS */}
+          <button
+            onClick={toggleGPS}
+            className={`flex flex-col items-center justify-center p-2 rounded-lg ${
+              gpsStatus !== 'inactive' ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-50'
+            }`}
+          >
+            {gpsStatus === 'searching' ? (
+              <MdGpsNotFixed className="text-lg mb-1 animate-pulse" />
+            ) : gpsStatus === 'active' ? (
+              <MdGpsFixed className="text-lg mb-1" />
+            ) : (
+              <FaLocationArrow className="text-lg mb-1" />
+            )}
+            <span className="text-xs">GPS</span>
+          </button>
 
-            {/* Layers Button */}
-            <button
-              className="flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-lg bg-gray-50 hover:bg-gray-100 transition-all duration-200"
-              onClick={handleDelete}
-              title="Clear All"
-            >
-              <FaTrash size={18} />
-            </button>
+          {/* Elevation Analysis */}
+          <button
+            onClick={() => setShowElevationAnalysis(true)}
+            disabled={!apiKey || points.length < 3}
+            className="flex flex-col items-center justify-center p-2 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          >
+            <FaChartArea className="text-lg mb-1" />
+            <span className="text-xs">Elevation</span>
+          </button>
 
-            {/* Elevation Analysis Button */}
-            <button
-              className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-all duration-200 ${
-                isAnalyzing ? 'bg-blue-500 text-white' : 'bg-gray-50 hover:bg-gray-100'
-              }`}
-              onClick={analyzeElevation}
-              disabled={isAnalyzing}
-              title="Analyze Elevation"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M12 3.5l4 4v9.5H4V7.5l4-4h4zm-2 1.5v3h2V5h-2z" clipRule="evenodd" />
-              </svg>
-            </button>
+          {/* Clear */}
+          <button
+            onClick={handleDelete}
+            disabled={points.length === 0}
+            className="flex flex-col items-center justify-center p-2 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          >
+            <FaTrash className="text-lg mb-1" />
+            <span className="text-xs">Clear</span>
+          </button>
 
-            {/* Add Edit Vertices Button */}
-            <button
-              className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-all duration-200 ${
-                isEditingVertices ? 'bg-blue-500 text-white' : 'bg-gray-50 hover:bg-gray-100'
-              }`}
-              onClick={enableVertexEditing}
-              title="Edit Vertices"
-            >
-              <FaPen size={18} />
-            </button>
-          </div>
+          {/* Save */}
+          <button
+            onClick={handleSave}
+            disabled={points.length < 3}
+            className="flex flex-col items-center justify-center p-2 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          >
+            <FaSave className="text-lg mb-1" />
+            <span className="text-xs">Save</span>
+          </button>
         </div>
       </div>
 
-      {/* Updated Elevation Analysis Panel */}
-      {showElevationAnalysis && elevationData && (
-        <div className="absolute right-4 top-24 bg-white p-4 rounded-lg shadow-lg z-[1000] w-80">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="font-semibold text-gray-700">Elevation Analysis</h3>
-            <button
-              onClick={() => setShowElevationAnalysis(false)}
-              className="text-gray-500 hover:text-gray-700"
-            >
-              ×
-            </button>
-          </div>
-          
-          <div className="space-y-2">
-            <div className="flex justify-between">
-              <span className="text-gray-600">Minimum Elevation:</span>
-              <span className="font-medium">
-                {typeof elevationData.min === 'number' 
-                  ? `${elevationData.min.toFixed(1)}m` 
-                  : 'N/A'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Maximum Elevation:</span>
-              <span className="font-medium">
-                {typeof elevationData.max === 'number' 
-                  ? `${elevationData.max.toFixed(1)}m` 
-                  : 'N/A'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Average Slope:</span>
-              <span className="font-medium">
-                {typeof elevationData.avgSlope === 'number' 
-                  ? `${elevationData.avgSlope.toFixed(1)}%` 
-                  : 'N/A'}
-              </span>
-            </div>
+      {/* Loading Overlay */}
+      {isAnalyzing && (
+        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-[2000]">
+          <div className="bg-white p-4 rounded-lg shadow-lg">
+            <div className="animate-spin w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full mb-2 mx-auto"></div>
+            <p className="text-sm text-center">Analyzing elevation...</p>
           </div>
         </div>
       )}
-
-      {/* Map Container */}
-      <div 
-        ref={mapContainerRef} 
-        className="w-full h-full"
-      />
     </div>
   );
 };
