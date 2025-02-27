@@ -263,68 +263,8 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
   }, []);
 
   const handleMapClick = useCallback((e: L.LeafletMouseEvent) => {
-    if (!isDrawing) {
-      // If not drawing, check if we clicked on an edge
-      if (drawnItemsRef.current) {
-        const layers = drawnItemsRef.current.getLayers();
-        if (layers.length > 0) {
-          const polygon = layers[0] as L.Polygon;
-          const vertices = polygon.getLatLngs()[0] as L.LatLng[];
-          
-          // Only proceed if we have at least 2 points to form a line
-          if (vertices.length >= 2) {
-            let minDistance = Infinity;
-            let insertIndex = -1;
-            let closestPoint: L.LatLng | null = null;
-            
-            // Check each line segment
-            for (let i = 0; i < vertices.length - 1; i++) {
-              const start = vertices[i];
-              const end = vertices[i + 1];
-              
-              // Calculate distance from click to this edge
-              const clickPoint = e.latlng;
-              const distance = distanceToSegment(clickPoint, start, end);
-              const point = getClosestPointOnSegment(clickPoint, start, end);
-              
-              // If this is the closest edge so far, store its details
-              if (distance < minDistance) {
-                minDistance = distance;
-                insertIndex = i + 1;
-                closestPoint = point;
-              }
-            }
-            
-            // If click is close enough to an edge (within 20 meters)
-            if (minDistance < 20 && closestPoint && insertIndex !== -1) {
-              // Insert new vertex
-              const newVertices = [...vertices];
-              newVertices.splice(insertIndex, 0, closestPoint);
-              
-              // Update polygon
-              polygon.setLatLngs(newVertices);
-              setPoints(newVertices);
-              
-              // Update area and markers
-              updateAreaSize(L.GeometryUtil.geodesicArea(newVertices));
-              addDraggableVertexMarkers(newVertices);
-              updateDistanceMarkers(newVertices);
-              
-              // Update corner count
-              const cornerCount = document.querySelector('.corner-count');
-              if (cornerCount) {
-                cornerCount.textContent = String(newVertices.length);
-              }
-              
-              return; // Exit after adding new point
-            }
-          }
-        }
-      }
-      return;
-    }
+    if (!isDrawing) return;
 
-    // Original drawing code...
     const newPoint = e.latlng;
     const newPoints = [...points, newPoint];
     setPoints(newPoints);
@@ -1537,9 +1477,9 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
     return L.latLng(xx, yy);
   };
 
-  // Update the handleEdgeClick function
+  // Update handleEdgeClick to properly handle polygon clicks
   const handleEdgeClick = (e: L.LeafletMouseEvent) => {
-    if (!drawnItemsRef.current) return;
+    if (!drawnItemsRef.current || isDrawing) return; // Don't handle edge clicks while drawing
 
     const layers = drawnItemsRef.current.getLayers();
     if (layers.length === 0) return;
@@ -1553,12 +1493,10 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
     let insertIndex = -1;
     let closestPoint: L.LatLng | null = null;
 
-    // Check all edges including the one between last and first point
     for (let i = 0; i < vertices.length; i++) {
       const start = vertices[i];
-      const end = vertices[(i + 1) % vertices.length]; // Use modulo to connect last point to first
+      const end = vertices[(i + 1) % vertices.length];
       
-      // Calculate the closest point on this edge segment
       const point = getClosestPointOnSegment(clickPoint, start, end);
       const distance = clickPoint.distanceTo(point);
 
@@ -1569,24 +1507,17 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
       }
     }
 
-    // If click is close enough to an edge (within 20 meters)
     if (minDistance < 20 && closestPoint && insertIndex !== -1) {
-      // Insert new vertex
       const newVertices = [...vertices];
       newVertices.splice(insertIndex, 0, closestPoint);
       
-      // Update polygon
       polygon.setLatLngs(newVertices);
       setPoints(newVertices);
       
-      // Update area
       updateAreaSize(L.GeometryUtil.geodesicArea(newVertices));
-      
-      // Update markers
       addDraggableVertexMarkers(newVertices);
       updateDistanceMarkers(newVertices);
 
-      // Update corner count
       const cornerCount = document.querySelector('.corner-count');
       if (cornerCount) {
         cornerCount.textContent = String(newVertices.length);
