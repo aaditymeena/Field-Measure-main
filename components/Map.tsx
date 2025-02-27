@@ -238,20 +238,15 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
 
   // Add layers configuration
   const mapLayers = {
-    streets: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    satellite: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap contributors'
     }),
-    satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: '© Esri'
-    }),
-    hybrid: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: '© Esri'
-    })
+   
   };
 
   // Cycle through layers on button click
   const cycleMapLayer = () => {
-    const layers = ['streets', 'satellite', 'hybrid'];
+    const layers = [ 'satellite'];
     const currentIndex = layers.indexOf(selectedLayer);
     const nextIndex = (currentIndex + 1) % layers.length;
     handleLayerChange(layers[nextIndex]);
@@ -1626,29 +1621,27 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
       const originalCenter = mapRef.current.getCenter();
       const originalPolygon = drawnItemsRef.current.getLayers()[0] as L.Polygon;
       const originalLatLngs = originalPolygon.getLatLngs()[0] as L.LatLng[];
-
-      // Switch to satellite and wait
-      handleLayerChange('satellite');
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Calculate bounds with all points
       const bounds = L.latLngBounds(originalLatLngs);
-      
-      // Set view to fit all points
+
+      // Temporarily switch to satellite layer without updating state
+      if (mapRef.current) {
+        // Remove current layers
+        Object.values(mapLayers).forEach(l => mapRef.current?.removeLayer(l));
+        // Add satellite layer directly
+        mapLayers.satellite.addTo(mapRef.current);
+      }
+
+      // Wait for satellite layer to load
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Fit bounds
       mapRef.current.fitBounds(bounds, {
         padding: [50, 50],
         maxZoom: 19
       });
-      await new Promise(resolve => setTimeout(resolve, 500));
 
-      // Update polygon style
-      originalPolygon.setStyle({
-        color: '#3388ff',
-        fillColor: '#3388ff',
-        fillOpacity: 0.2,
-        weight: 3,
-        opacity: 0.8
-      });
+      // Wait for map to settle
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       // Take screenshot
       const mapElement = mapRef.current.getContainer();
@@ -1659,7 +1652,13 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
         logging: false,
         backgroundColor: null,
         removeContainer: false,
-        foreignObjectRendering: true
+        foreignObjectRendering: true,
+        onclone: (doc: Document) => {
+          const mapContainer = doc.querySelector('.leaflet-container');
+          if (mapContainer instanceof HTMLElement) {
+            mapContainer.style.background = 'none';
+          }
+        }
       });
 
       // Create final image with info box
@@ -1713,9 +1712,14 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
 
-        // Restore original view
-        handleLayerChange(currentLayer);
-        mapRef.current?.setView(originalCenter, originalZoom, { animate: false });
+        // Restore original state without using handleLayerChange
+        if (mapRef.current) {
+          // Remove all layers
+          Object.values(mapLayers).forEach(l => mapRef.current?.removeLayer(l));
+          // Add original layer back
+          mapLayers[currentLayer].addTo(mapRef.current);
+          mapRef.current.setView(originalCenter, originalZoom, { animate: false });
+        }
         
         // Remove loading
         document.body.removeChild(loadingDiv);
