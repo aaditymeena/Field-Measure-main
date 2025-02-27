@@ -7,6 +7,7 @@ import { MdGpsFixed, MdGpsNotFixed } from 'react-icons/md';
 import { Chart } from 'react-chartjs-2';
 import { Chart as ChartJS } from 'chart.js/auto';
 import { interpolateColor } from '../utils/colorUtils';
+import html2canvas from 'html2canvas';
 
 
 // Import leaflet-draw properly
@@ -284,41 +285,42 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
 
     const layers = drawnItemsRef.current?.getLayers() || [];
     if (layers.length === 0) {
+      // Create initial polygon
       const polygon = L.polygon([newPoint], {
         color: '#3388ff',
+        fillColor: '#3388ff',
         fillOpacity: 0.2,
         weight: 3,
+        opacity: 0.8,
         lineCap: 'round',
-        lineJoin: 'round',
-        className: 'rounded-polygon'
+        lineJoin: 'round'
       }).addTo(drawnItemsRef.current!);
-      
-      const cornerCount = document.querySelector('.corner-count');
-      if (cornerCount) {
-        cornerCount.textContent = '1';
-      }
     } else {
+      // Update existing polygon
       const polygon = layers[0] as L.Polygon;
       polygon.setLatLngs(newPoints);
-      polygon.setStyle({
-        weight: 3,
-        lineCap: 'round',
-        lineJoin: 'round',
-        className: 'rounded-polygon'
-      });
       
-      if (newPoints.length > 2) {
-        updateAreaSize(L.GeometryUtil.geodesicArea(newPoints));
-        const cornerCount = document.querySelector('.corner-count');
-        if (cornerCount) {
-          cornerCount.textContent = String(newPoints.length);
-        }
-      } else {
-        const cornerCount = document.querySelector('.corner-count');
-        if (cornerCount) {
-          cornerCount.textContent = '2';
-        }
-      }
+      // Update polygon style
+      polygon.setStyle({
+        color: '#3388ff',
+        fillColor: '#3388ff',
+        fillOpacity: 0.2,
+        weight: 3,
+        opacity: 0.8,
+        lineCap: 'round',
+        lineJoin: 'round'
+      });
+    }
+
+    // Update area calculation if we have at least 3 points
+    if (newPoints.length > 2) {
+      updateAreaSize(L.GeometryUtil.geodesicArea(newPoints));
+    }
+
+    // Update corner count
+    const cornerCount = document.querySelector('.corner-count');
+    if (cornerCount) {
+      cornerCount.textContent = String(newPoints.length);
     }
 
     // Update markers with draggable functionality
@@ -1603,58 +1605,128 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
   }, []);
 
   // Add handleSave function before the return statement
-  const handleSave = () => {
-    if (!drawnItemsRef.current || points.length < 3) return;
+  const handleSave = async () => {
+    if (!drawnItemsRef.current || points.length < 3 || !mapRef.current) return;
 
     try {
-      const layers = drawnItemsRef.current.getLayers();
-      if (layers.length === 0) return;
+      // Show loading
+      const loadingDiv = document.createElement('div');
+      loadingDiv.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-[2000]';
+      loadingDiv.innerHTML = `
+        <div class="bg-white p-4 rounded-lg shadow-lg">
+          <div class="animate-spin w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full mb-2 mx-auto"></div>
+          <p class="text-sm text-center">Generating map image...</p>
+        </div>
+      `;
+      document.body.appendChild(loadingDiv);
 
-      const polygon = layers[0] as L.Polygon;
-      const vertices = polygon.getLatLngs()[0] as L.LatLng[];
-      
-      // Calculate area
-      const area = L.GeometryUtil.geodesicArea(vertices);
-      
-      // Calculate perimeter
-      let perimeter = 0;
-      for (let i = 0; i < vertices.length; i++) {
-        const start = vertices[i];
-        const end = vertices[(i + 1) % vertices.length];
-        perimeter += start.distanceTo(end);
-      }
+      // Store original state
+      const currentLayer = selectedLayer;
+      const originalZoom = mapRef.current.getZoom();
+      const originalCenter = mapRef.current.getCenter();
+      const originalPolygon = drawnItemsRef.current.getLayers()[0] as L.Polygon;
+      const originalLatLngs = originalPolygon.getLatLngs()[0] as L.LatLng[];
 
-      // Create field boundary object
-      const fieldBoundary = {
-        vertices: vertices.map(v => ({ lat: v.lat, lng: v.lng })),
-        area: area,
-        perimeter: perimeter
-      };
+      // Switch to satellite and wait
+      handleLayerChange('satellite');
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
-      // Convert to JSON string
-      const jsonData = JSON.stringify(fieldBoundary, null, 2);
+      // Calculate bounds with all points
+      const bounds = L.latLngBounds(originalLatLngs);
       
-      // Create blob and download link
-      const blob = new Blob([jsonData], { type: 'application/json' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `field_boundary_${new Date().toISOString().split('T')[0]}.json`;
-      
-      // Trigger download
-      document.body.appendChild(link);
-      link.click();
-      
-      // Cleanup
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      // Set view to fit all points
+      mapRef.current.fitBounds(bounds, {
+        padding: [50, 50],
+        maxZoom: 19
+      });
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-      // Optional: Show success message
-      alert('Field boundary saved successfully!');
+      // Update polygon style
+      originalPolygon.setStyle({
+        color: '#3388ff',
+        fillColor: '#3388ff',
+        fillOpacity: 0.2,
+        weight: 3,
+        opacity: 0.8
+      });
+
+      // Take screenshot
+      const mapElement = mapRef.current.getContainer();
+      const canvas = await html2canvas(mapElement, {
+        useCORS: true,
+        allowTaint: true,
+        scale: 2,
+        logging: false,
+        backgroundColor: null,
+        removeContainer: false,
+        foreignObjectRendering: true
+      });
+
+      // Create final image with info box
+      const finalCanvas = document.createElement('canvas');
+      const ctx = finalCanvas.getContext('2d');
+      if (!ctx) throw new Error('Could not get canvas context');
+
+      finalCanvas.width = canvas.width;
+      finalCanvas.height = canvas.height + 200;
+
+      // Draw map
+      ctx.drawImage(canvas, 0, 0);
+
+      // Draw info box
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.fillRect(0, canvas.height, finalCanvas.width, 200);
+
+      // Add info
+      ctx.fillStyle = '#000000';
+      ctx.font = 'bold 16px Arial';
+      ctx.fillText('Field Details', 20, canvas.height + 30);
+
+      ctx.font = '14px Arial';
+      const center = bounds.getCenter();
+      ctx.fillText(`📍 Location: ${center.lat.toFixed(6)}°, ${center.lng.toFixed(6)}°`, 20, canvas.height + 60);
+      ctx.fillText(`📐 Area: ${areaSize}`, 20, canvas.height + 90);
+
+      // Add address
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${center.lat}&lon=${center.lng}`
+      );
+      const locationData = await response.json();
+      ctx.fillText(`🏠 Address: ${locationData.display_name}`, 20, canvas.height + 120);
+
+      // Add date
+      const now = new Date();
+      ctx.fillText(`📅 ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`, 20, canvas.height + 150);
+
+      // Save image
+      finalCanvas.toBlob((blob) => {
+        if (!blob) return;
+        
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `field_map_${now.toISOString().split('T')[0]}.png`;
+        
+        document.body.appendChild(link);
+        link.click();
+        
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+
+        // Restore original view
+        handleLayerChange(currentLayer);
+        mapRef.current?.setView(originalCenter, originalZoom, { animate: false });
+        
+        // Remove loading
+        document.body.removeChild(loadingDiv);
+      }, 'image/png', 1.0);
 
     } catch (error) {
-      console.error('Error saving field boundary:', error);
-      alert('Failed to save field boundary. Please try again.');
+      console.error('Error saving map:', error);
+      alert('Failed to save map. Please try again.');
+      
+      const loadingDiv = document.querySelector('div.fixed.inset-0');
+      if (loadingDiv) document.body.removeChild(loadingDiv);
     }
   };
 
@@ -1765,7 +1837,7 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
           {/* Edit Vertices */}
           <button
             onClick={enableVertexEditing}
-            className={`flex flex-col items-center justify-center p-2 rounded-lg ${
+            className={` flex-col items-center justify-center p-2 hidden rounded-lg ${
               isEditingVertices ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-50'
             }`}
           >
