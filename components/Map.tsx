@@ -1256,19 +1256,21 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
 
         marker.on('drag', (e) => {
           const newLatLng = e.target.getLatLng();
-          const newPoints = [...points];
-          newPoints[index] = newLatLng;
-          
-          // Update polygon vertices
           const layers = drawnItemsRef.current?.getLayers() || [];
           if (layers.length > 0) {
             const polygon = layers[0] as L.Polygon;
-            polygon.setLatLngs(newPoints);
-            updateAreaSize(L.GeometryUtil.geodesicArea(newPoints));
+            const currentPoints = [...polygon.getLatLngs()[0] as L.LatLng[]];
+            currentPoints[index] = newLatLng;
             
-            // Update points state and distance markers
-            setPoints(newPoints);
-            updateDistanceMarkers(newPoints);
+            // Update polygon vertices
+            polygon.setLatLngs(currentPoints);
+            updateAreaSize(L.GeometryUtil.geodesicArea(currentPoints));
+            
+            // Update points state
+            setPoints(currentPoints);
+            
+            // Update distance markers
+            updateDistanceMarkers(currentPoints);
           }
         });
 
@@ -1277,6 +1279,44 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
           if (element) {
             element.style.backgroundColor = '#ffffff';
           }
+          
+          // Get final position and update all markers
+          const layers = drawnItemsRef.current?.getLayers() || [];
+          if (layers.length > 0) {
+            const polygon = layers[0] as L.Polygon;
+            const finalPoints = polygon.getLatLngs()[0] as L.LatLng[];
+            setPoints(finalPoints);
+            
+            // Clear and recreate all markers
+            vertexMarkers.forEach(m => {
+              if (mapRef.current) {
+                mapRef.current.removeLayer(m);
+              }
+            });
+            
+            // Create new markers for all points
+            const updatedMarkers = finalPoints.map((p, i) => {
+              const newMarker = L.marker(p, {
+                icon: L.divIcon({
+                  className: 'vertex-marker',
+                  html: '<div class="vertex-marker-inner"></div>',
+                  iconSize: [12, 12],
+                  iconAnchor: [6, 6]
+                }),
+                draggable: true
+              });
+              
+              if (mapRef.current) {
+                newMarker.addTo(mapRef.current);
+                // Add the same event listeners to new marker
+                addMarkerEventListeners(newMarker, i, finalPoints);
+              }
+              
+              return newMarker;
+            });
+            
+            setVertexMarkers(updatedMarkers);
+          }
         });
       }
 
@@ -1284,6 +1324,38 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
     });
 
     setVertexMarkers(newMarkers);
+  };
+
+  // Helper function to add event listeners to markers
+  const addMarkerEventListeners = (marker: L.Marker, index: number, points: L.LatLng[]) => {
+    marker.on('dragstart', () => {
+      const element = marker.getElement();
+      if (element) {
+        element.style.backgroundColor = '#ff3333';
+      }
+    });
+
+    marker.on('drag', (e) => {
+      const newLatLng = e.target.getLatLng();
+      const layers = drawnItemsRef.current?.getLayers() || [];
+      if (layers.length > 0) {
+        const polygon = layers[0] as L.Polygon;
+        const currentPoints = [...polygon.getLatLngs()[0] as L.LatLng[]];
+        currentPoints[index] = newLatLng;
+        
+        polygon.setLatLngs(currentPoints);
+        updateAreaSize(L.GeometryUtil.geodesicArea(currentPoints));
+        setPoints(currentPoints);
+        updateDistanceMarkers(currentPoints);
+      }
+    });
+
+    marker.on('dragend', () => {
+      const element = marker.getElement();
+      if (element) {
+        element.style.backgroundColor = '#ffffff';
+      }
+    });
   };
 
   // Update CSS for better visibility during drag
