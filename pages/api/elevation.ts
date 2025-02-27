@@ -39,10 +39,10 @@ export default async function handler(
     }
 
   } catch (error) {
-    console.error('Elevation API error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     return res.status(500).json({ 
       message: 'Failed to fetch elevation data',
-      error: error.message 
+      error: errorMessage
     });
   }
 }

@@ -45,6 +45,17 @@ declare module 'leaflet' {
   interface Map {
     draw?: DrawConstructor;
   }
+
+  interface ControlOptions {
+    position?: ControlPosition;
+  }
+
+  interface Polygon {
+    editing?: {
+      enable(): void;
+      disable(): void;
+    };
+  }
 }
 
 interface MapProps {
@@ -221,7 +232,7 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
     area: 0,
     perimeter: 0
   });
-  const [vertexMarkers, setVertexMarkers] = useState<L.CircleMarker[]>([]);
+  const [vertexMarkers, setVertexMarkers] = useState<L.Marker[]>([]);
   const [isEditingVertices, setIsEditingVertices] = useState(false);
 
   // Add layers configuration
@@ -276,7 +287,7 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
       const polygon = L.polygon([newPoint], {
         color: '#3388ff',
         fillOpacity: 0.2,
-        smoothFactor: 5,
+        weight: 3,
         lineCap: 'round',
         lineJoin: 'round',
         className: 'rounded-polygon'
@@ -290,7 +301,7 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
       const polygon = layers[0] as L.Polygon;
       polygon.setLatLngs(newPoints);
       polygon.setStyle({
-        smoothFactor: 5,
+        weight: 3,
         lineCap: 'round',
         lineJoin: 'round',
         className: 'rounded-polygon'
@@ -942,33 +953,38 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
       });
 
       // Add enhanced legend
-      const legend = L.control({ position: 'bottomright' });
-      legend.onAdd = () => {
-        const div = L.DomUtil.create('div', 'elevation-legend');
-        div.innerHTML = `
-          <div class="bg-white p-3 rounded-lg shadow-lg">
-            <div class="text-sm font-medium mb-2">Elevation Analysis</div>
-            <div class="flex items-center gap-2 mb-2">
-              <div class="w-24 h-4 bg-gradient-to-r from-[#2b83ba] to-[#d7191c]"></div>
-              <div class="flex justify-between w-full text-xs">
-                <span>${min.toFixed(1)}m</span>
-                <span>${max.toFixed(1)}m</span>
+      const legend = L.Control.extend({
+        options: {
+          position: 'bottomright'
+        },
+        onAdd: function() {
+          const div = L.DomUtil.create('div', 'elevation-legend');
+          div.innerHTML = `
+            <div class="bg-white p-3 rounded-lg shadow-lg">
+              <div class="text-sm font-medium mb-2">Elevation Analysis</div>
+              <div class="flex items-center gap-2 mb-2">
+                <div class="w-24 h-4 bg-gradient-to-r from-[#2b83ba] to-[#d7191c]"></div>
+                <div class="flex justify-between w-full text-xs">
+                  <span>${min.toFixed(1)}m</span>
+                  <span>${max.toFixed(1)}m</span>
+                </div>
+              </div>
+              <div class="text-xs space-y-1">
+                <div>Elevation Range: ${(max - min).toFixed(1)}m</div>
+                <div>Average: ${(elevations.reduce((a, b) => a + b, 0) / elevations.length).toFixed(1)}m</div>
+                <div>Slope: ${((max - min) / (bounds.getNorth() - bounds.getSouth()) * 100).toFixed(1)}%</div>
               </div>
             </div>
-            <div class="text-xs space-y-1">
-              <div>Elevation Range: ${(max - min).toFixed(1)}m</div>
-              <div>Average: ${(elevations.reduce((a, b) => a + b, 0) / elevations.length).toFixed(1)}m</div>
-              <div>Slope: ${((max - min) / (bounds.getNorth() - bounds.getSouth()) * 100).toFixed(1)}%</div>
-            </div>
-          </div>
-        `;
-        return div;
-      };
-      legend.addTo(mapRef.current!);
+          `;
+          return div;
+        }
+      });
+      new legend().addTo(mapRef.current!);
 
     } catch (error) {
       console.error('Elevation analysis failed:', error);
-      alert(`Failed to analyze elevation: ${error.message}. Please check your API key and try again.`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      alert(`Failed to analyze elevation: ${errorMessage}. Please check your API key and try again.`);
     } finally {
       setIsAnalyzing(false);
     }
@@ -1652,7 +1668,12 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
               value={selectedUnit}
               onChange={(e) => {
                 setSelectedUnit(e.target.value as MeasurementUnit);
-                updateAreaSize(L.GeometryUtil.geodesicArea(drawnItemsRef.current?.getLayers()[drawnItemsRef.current.getLayers().length - 1].getLatLngs()[0] as L.LatLng[]));
+                const layers = drawnItemsRef.current?.getLayers() || [];
+                if (layers.length > 0) {
+                  const polygon = layers[layers.length - 1] as L.Polygon;
+                  const vertices = polygon.getLatLngs()[0] as L.LatLng[];
+                  updateAreaSize(L.GeometryUtil.geodesicArea(vertices));
+                }
               }}
             >
               <option value="ha">ha</option>
@@ -1668,10 +1689,15 @@ const Map: React.FC<MapProps> = ({ onAreaUpdate, apiKey }) => {
           <div className="flex items-center gap-1 sm:gap-2">
             <span className="text-gray-500 text-xs sm:text-base whitespace-nowrap">Corners:</span>
             <span className="font-semibold text-blue-600 text-xs sm:text-base">
-              {drawnItemsRef.current?.getLayers().length > 0 
-                ? (drawnItemsRef.current.getLayers()[drawnItemsRef.current.getLayers().length - 1] as L.Polygon)
-                  .getLatLngs()[0].length 
-                : 0}
+              {(() => {
+                const layers = drawnItemsRef.current?.getLayers() || [];
+                if (layers.length > 0) {
+                  const polygon = layers[layers.length - 1] as L.Polygon;
+                  const vertices = polygon.getLatLngs()[0] as L.LatLng[];
+                  return vertices.length;
+                }
+                return 0;
+              })()}
             </span>
           </div>
         </div>
